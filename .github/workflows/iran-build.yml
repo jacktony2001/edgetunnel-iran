@@ -1,0 +1,57 @@
+# Builds dist/_worker.js from the untouched upstream worker plus iran/ patches.
+# Runs after Upstream Sync so upstream fixes flow into the build, and fails loudly
+# (never publishes a broken build) if upstream code drifted away from the patches.
+name: Iran Build
+
+permissions:
+  contents: write
+
+on:
+  push:
+    paths:
+      - "_worker.js"
+      - "iran/**"
+      - ".github/workflows/iran-build.yml"
+  schedule:
+    - cron: "30 5 * * *"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      - name: Build dist/_worker.js
+        run: node iran/build.mjs
+
+      - name: Package Pages-ready zip
+        run: |
+          mkdir -p pages-package
+          cp dist/_worker.js pages-package/_worker.js
+          cp iran/pool.json pages-package/iran-pool.json
+          cd pages-package && zip -r ../iran-pages.zip .
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: edgetunnel-iran
+          path: |
+            dist/_worker.js
+            iran-pages.zip
+          if-no-files-found: error
+
+      - name: Commit dist
+        run: |
+          git config user.name "iran-build"
+          git config user.email "iran-build@users.noreply.github.com"
+          git add -f dist/_worker.js dist/iran-pool.json
+          if git diff --cached --quiet; then
+            echo "dist already up to date"
+          else
+            git commit -m "build: refresh dist from upstream + iran pool [skip ci]"
+            git push
+          fi
