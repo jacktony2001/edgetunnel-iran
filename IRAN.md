@@ -1,64 +1,80 @@
-# ادج‌تونل — نسخه‌ی ایران (نت پر‌نویز و فیلتر)
+# edgetunnel — Iran build
 
-این ریپو یک فورک از [cmliu/edgetunnel](https://github.com/cmliu/edgetunnel) است. فایل آپ‌استریم `_worker.js` **هرگز دست‌نخورده می‌ماند** تا «Upstream Sync» بدون تضاد ادغام کار کند؛ لایه‌ی ایران در پوشه‌ی `iran/` است و یک Action نسخه‌ی نهایی را در `dist/_worker.js` می‌سازد. **همان فایل `dist/_worker.js` را دیپلوی کن، نه `_worker.js` را.**
+A fork of [cmliu/edgetunnel](https://github.com/cmliu/edgetunnel) tuned for heavily filtered, high‑loss networks.
 
-## چه چیزی عوض شد و چرا
+The upstream `_worker.js` is **never edited**, so the built-in `Upstream Sync` action keeps merging without conflicts. All Iran-specific code lives in `iran/`, and the **Iran Build** action writes the deployable file to `dist/_worker.js`.
 
-| نسخه‌ی اصلی | نسخه‌ی ایران |
-|---|---|
-| اگر `PROXYIP` ست کرده باشی، یکی تصادفی انتخاب می‌شود و بقیه فراموش می‌شوند؛ اگر آن مرده باشد، کانکشن می‌میرد | کل لیست به مسابقه‌ی `connectProxyIP` داده می‌شود؛ سریع‌ترین برنده می‌شود و بقیه به‌عنوان پشتیبان می‌مانند |
-| اگر `PROXYIP` ست نکرده باشی (حالت «بدون سرور»)، فقط استخر پیش‌فرض خودِ پروژه | استخر پیش‌فرض + آدرس‌های `iran/pool.json` با هم مسابقه می‌دهند، و fallback داخلی هم فعال می‌ماند |
-| فاصله‌های اضافی داخل `PROXYIP` باعث می‌شود آن آیتم بی‌مصرف شود | هر آیتم.trim می‌شود |
+> Deploy `dist/_worker.js`. Never deploy the root `_worker.js` — that one has no patches in it.
 
-اگر بک‌اند شخصی (`PROXYIP`) داشته باشی، استخر عمومی **هرگز** با ترافیک قاطی نمی‌شود؛ فقط لیست خودت مسابقه می‌دهد.
+## What changes
 
-## نصب (بدون ترمینال، با مرورگر)
+| Upstream | This build |
+| --- | --- |
+| When `PROXYIP` is set, one entry is picked at random and the rest are forgotten; if that entry is dead the connection dies | The whole list is handed to the racing dialer, so the fastest live endpoint wins and the others stay as backups |
+| With no `PROXYIP` you get only the project's own default pool | Default pool **plus** the endpoints in `iran/pool.json`, and the built-in fallback stays enabled |
+| Spaces inside a `PROXYIP` list silently break entries | Entries are trimmed and de-duplicated |
 
-1. برو به اکانت کلادفلر → **Workers & Pages** → **Create application** → **Get started** با یک Worker خالی؛ اسم بگذار مثلاً `edt-ir`.
-2. آدرس این فایل را باز کن و کل محتوا را کپی کن:
-   `https://raw.githubusercontent.com/<نام‌کاربری‌تو>/<نام‌ریپو>/main/dist/_worker.js`
-   (اگر این آدرس ۴۰۴ شد: از تب **Actions** آخرین اجرا را باز کن و از Artifact به نام `edgetunnel-iran` همان فایل را بردار.)
-3. در ادیتور کلادفلر، محتوای پیش‌فرض را کامل پاک کن و فایل کپی‌شده را جایگزین کن → **Save and Deploy**.
-4. **Settings → Variables and Secrets → Add**:
-   - `ADMIN` = یک رمز بلند (بدون این، پنل باز نمی‌شود)
-   - `KEY` = یک عبارت تصادفی (این، مسیر اشتراکت می‌شود: `/KEY`)
-   - `PROXY_CONCURRENT_DIAL` = `3`
-   - `PRELOAD_RACE_DIAL` = `1`
-   - `URL` = `1101`
-5. **Settings → Bindings → Add → KV namespace**؛ یک namespace بساز و **Variable name** را دقیقاً `KV` بگذار → **Save and Deploy** (دوباره deploy لازم است).
-6. برو به `https://<نام‌ورکر>.<اکانت>.workers.dev/admin` و با رمز `ADMIN` وارد شو.
-7. در پنل، این‌ها را روشن کن (برای نت ایران):
-   - **ECH** → روشن. این تنها راهِ رایگان است که اسم `workers.dev` داخل TLS پنهان شود و فیلتر SNI گیر ندهد.
-   - **Fingerprint** → `chrome`
-   - **TLS分片 (تکه‌تکه‌سازی TLS)** → `Shadowrocket`
-   - **ALPN** → `h3,h2,1.1`
-   - **0RTT** → اختیاری؛ روشن‌کردن اتصال اول را سریع‌تر می‌کند.
-8. آدرس اشتراک را از همان پنل بردار و در کلاینت بریز. **کلاینت باید ECH پشتیبانی کند**: v2rayNG (نسخه‌های جدید)، Hiddify، sing-box، Karing. Streisand و نسخه‌های قدیمی v2rayNG پشتیبانی نمی‌کنند؛ اگر آن‌ها را استفاده می‌کنی ECH را خاموش کن وگرنه هیچ گره‌ای وصل نمی‌شود.
+If you set your own `PROXYIP`, public pool endpoints are **never** mixed into your traffic — only your own list races.
 
-## استخر را چطور تازه نگه داری
+## Deploy (Cloudflare dashboard, no terminal)
 
-وقتی یک دوره همه‌ی گره‌ها می‌میرند، معمولاً یعنی استخر اهدایی عوض شده. دو راه داری:
+1. Open `https://raw.githubusercontent.com/<owner>/<repo>/main/dist/_worker.js`, select all, copy.
+2. Cloudflare dashboard → **Workers & Pages** → **Create** → **Get started** → name it `edt-ir` → **Deploy**.
+3. **Edit code** → delete the template → paste → **Save and Deploy**. You now have `https://edt-ir.<account>.workers.dev`.
+4. **Settings → Variables and Secrets → Edit as code**:
 
-- **موقت (بدون کامیت):** در کلادفلر یک متغیر `PROXYIP` اضافه کن و آدرس‌های تازه را با کاما جدا بنویس. بلافاصله اعمال می‌شود.
-- **دائمی:** `iran/pool.json` را ویرایش کن؛ Action با نام **Iran Build** خودش `dist/_worker.js` را بازسازی و کامیت می‌کند، و تو فقط دوباره فایل را در کلادفلر Paste و Deploy می‌کنی.
+   ```
+   ADMIN  = a long random password
+   KEY    = a short random string (this becomes your subscription path)
+   PROXY_CONCURRENT_DIAL = 3
+   PRELOAD_RACE_DIAL     = 1
+   URL                   = 1101
+   ```
 
-هر آدرسی که اضافه می‌کنی یک جست‌وجوی DNS اضافه به شروع اتصال اضافه می‌کند؛ لیست را کوتاه نگه دار (۳ تا ۵ تا).
+   **Save and Deploy**. If a **Compatibility date** is shown and it is older than `2025-11-04`, set it to that and deploy again.
+5. **Settings → Bindings → Add → KV namespace** → create `edt-ir-kv` → set **Variable name** to exactly `KV` → **Save and Deploy**. This must come *after* step 3, otherwise the binding fails.
+6. Open `https://edt-ir.<account>.workers.dev/admin` and log in with `ADMIN`.
 
-## وقتی کار نمی‌کند، به همین ترتیب چک کن
+The panel is served by upstream and is Chinese-only (no language switch). Right-click the page and use the browser's **Translate to English** — every field then reads by its English name. The ones that matter here:
 
-1. **خودِ ورکر زنده است؟** آدرس `/admin` را باز کن. صفحه‌ی لاگین نیامد → مشکل از کلادفلر یا آدرس است، از فیلتر نه.
-2. **آدرس از ایران باز می‌شود؟** اگر `/admin` هم باز نمی‌شود، مشکل `workers.dev` است، نه گره. ECH روی کلاینت را چک کن؛ اگر باز هم نشد، تنها راه‌حل واقعی بستن دامنه‌ی شخصی روی کلادفلر است (همه‌ی چیزهای دیگر در این ریپو بی‌فایده‌اند تا این حل نشود).
-3. **گره وصل می‌شود ولی ترافیک نمی‌رود؟** یعنی استخر مرده است. لاگ‌های پنل  را بخوان: خط `[TCP转发] ... 反代IP:` نشان می‌دهد کدام مقصد امتحان شده. یک `PROXYIP` تازه اضافه کن.
-4. **وصل می‌شود ولی خیلی کند/قطع‌وپرسی است؟** `PROXY_CONCURRENT_DIAL` را `4` کن و **TLS分片** را روی `Happ` بگذار.
+| Setting | Value | Why |
+| --- | --- | --- |
+| ECH | on | Puts the real hostname inside encrypted ClientHello, which is the only free answer to `workers.dev` SNI filtering |
+| TLS fingerprint | `chrome` | Blends the handshake with normal browser traffic |
+| TLS fragmentation (Shadowrocket) | on | Splits the handshake into small pieces so packet loss and DPI don't kill it |
+| ALPN | `h3,h2,1.1` | Lets the client fall back when one protocol is throttled |
+| Subscription refresh interval | `24` hours | The free plan caps at 100k requests/day; clients refreshing every 3 hours burn it |
 
-## محدودیت‌هایی که باید بدانی
+If ECH is on and *nothing* connects, turn ECH off: older v2rayNG builds can't fetch the ECH config and fail outright instead of falling back. For ECH use Hiddify, Karing, or a current v2rayNG.
 
-- **بدون سرور شخصی یعنی قرض‌گرفتن اینترنت بقیه.** هر استخر عمومی — از جمله همین — به سرور داوطلبانی وابسته است که هر وقت بخواهند می‌توانند بروند یا بلاک شوند. کاری که این فورک می‌کند این است که مرگ یک منبع را حس نکنی، نه اینکه منبع بسازد.
-- **`workers.dev` در ایران نقطه‌ی ضعف اصلی است.** بلاک شدن SNI یا IP آن را هیچ تنظیمی داخل ورکر درست نمی‌کند؛ ECH کمک می‌کند ولی تضمینی نیست. دامنه‌ی شخصی روی کلادفلر (حتی ارزان‌ترین TLD) پایدارترین سرمایه‌گذاری این مسیر است.
-- **پلن رایگان کلادفلر** ۱۰۰ هزار درخواست در روز سقف دارد؛ اشتراک وای‌فای عمومی و آپدیت خودکار کلاینت‌ها سهم زیادی می‌خورند. در ویرایشگر کانفیگ پنل، `优选订阅生成.SUBUpdateTime` را روی ۲۴ ساعت یا بیشتر بگذار.
+## Subscription
 
-## طرز کار ریپو
+```
+https://edt-ir.<account>.workers.dev/<your KEY value>
+```
 
-- `main` = کپی آپ‌استریم + فایل‌های `iran/` (Action داخلی `sync.yml` هر روز آپ‌استریم را merge می‌کند؛ چون فایل‌های ما مسیر تازه دارند، تضادی رخ نمی‌دهد).
-- `.github/workflows/iran-build.yml` = بازسازی `dist/_worker.js`. اگر آپ‌استریم کدی را که پچ رویش می‌نشیند جابه‌جا کند، بیلد **با خطا می‌ایستد** و نسخه‌ی خراب منتشر نمی‌کند؛ آن‌وقت باید پچ در `iran/build.mjs` را به‌روز کنی.
-- لایسنس آپ‌استریم GPL-2.0 است؛ فورک عمومی بودن مشکلی ندارد.
+Import it as a subscription URL. Keep the Cloudflare worker's own `/admin` page as the only place that can change these settings.
+
+## Refreshing the pool
+
+When every node dies at once, the donated upstreams have changed or been filtered.
+
+* **Fast fix (no commit):** add a `PROXYIP` variable in Cloudflare with two or three fresh endpoints separated by commas → Save and Deploy.
+* **Permanent fix:** edit `iran/pool.json`; the **Iran Build** action rebuilds `dist/_worker.js`, then paste and deploy it again.
+
+Keep the list short (3 to 5). Every hostname costs one extra DNS lookup when a connection starts.
+
+## Troubleshooting order
+
+1. **Does `/admin` open?** No → the worker or its URL is the problem, not the nodes.
+2. **Does the URL open from inside Iran?** If `/admin` is unreachable, `workers.dev` is being filtered and no node setting will help. Fix ECH on the client, or move to a custom domain.
+3. **Connects but no traffic?** The upstream pool is dead. Read the panel log line `[TCP] ... proxyIP:` to see which target was tried, then add a fresh `PROXYIP`.
+4. **Connects but slow or dropping?** Set `PROXY_CONCURRENT_DIAL = 4` and switch fragmentation to the `Happ` variant.
+
+## Honest limits
+
+* **No server of your own means borrowed internet.** Any public pool, including this one, runs on donated machines that can vanish or be blocked at any time. This build stops you from *noticing* one death; it cannot create egress.
+* **`workers.dev` is the weak point.** If filtering hits Cloudflare's IPs rather than the SNI, ECH won't save it. A custom domain on Cloudflare is the durable fix, and the same worker serves it with zero code change.
+* **The build fails loudly.** If upstream moves the code a patch sits on, **Iran Build** errors out instead of publishing a broken worker; update `iran/build.mjs` then.
+
+Upstream license: GPL-2.0. Public fork, so nothing extra is required.
