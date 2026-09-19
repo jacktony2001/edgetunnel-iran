@@ -77,4 +77,6 @@ Keep the list short (3 to 5). Every hostname costs one extra DNS lookup when a c
 * **`workers.dev` is the weak point.** If filtering hits Cloudflare's IPs rather than the SNI, ECH won't save it. A custom domain on Cloudflare is the durable fix, and the same worker serves it with zero code change.
 * **The build fails loudly.** If upstream moves the code a patch sits on, **Iran Build** errors out instead of publishing a broken worker; update `iran/build.mjs` then.
 
+One upstream file is edited in this fork: `wrangler.toml` (`name = "edt-ir"`, `main = "dist/_worker.js"` so Cloudflare's *Deploy from Git* uses the patched build). If `Upstream Sync` ever conflicts on it, keep `main = "dist/_worker.js"`.
+
 Upstream license: GPL-2.0. Public fork, so nothing extra is required.
