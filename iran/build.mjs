@@ -24,7 +24,7 @@ const 头注入 = {
 		`const IRAN_POOL = ${JSON.stringify(反代池.map(h => h.trim().toLowerCase()))};`,
 		`const IRAN_POOL_UPDATED = ${JSON.stringify(池更新日期 || '')};`,
 		`const IRAN_乱序 = (数组) => { for (let i = 数组.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [数组[i], 数组[j]] = [数组[j], 数组[i]]; } return 数组; };`,
-	].join('\r\n'),
+	].join('\n'),
 };
 
 const 拨号补丁 = {
@@ -44,7 +44,7 @@ const 拨号补丁 = {
 		`			默认反代IP = [...new Set(proxyIPs)].join(',');`,
 		`			默认反代兜底 = true;`,
 		`		};`,
-	].join('\r\n'),
+	].join('\n'),
 };
 
 function 应用补丁(内容, 补丁) {
@@ -58,7 +58,9 @@ function 应用补丁(内容, 补丁) {
 	return 内容.slice(0, 位置 + 补丁.anchor.length) + 补丁.insert + 内容.slice(位置 + 补丁.anchor.length);
 }
 
-let 输出 = readFileSync(源文件, 'utf8');
+// The repo stores upstream with LF; normalise so a CRLF Windows checkout doesn't rewrite
+// the whole build and fight the CI commit on every run.
+let 输出 = readFileSync(源文件, 'utf8').replace(/\r\n/g, '\n');
 for (const 补丁 of [头注入, 拨号补丁]) 输出 = 应用补丁(输出, 补丁);
 
 for (const 标记 of ['const IRAN_POOL = [', '} else if (IRAN_POOL.length) {']) {
