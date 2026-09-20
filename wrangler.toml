@@ -1,10 +1,13 @@
-name = "edt-ir"
+name = "edgetunnel-iran"
 main = "_worker.js"
 compatibility_date = "2025-11-04"
+# The ADMIN and KEY secrets live in the dashboard, so keep them across deploys.
 keep_vars = true
 
-# Bind a Workers KV namespace under the binding name "KV".
-# Without it the admin panel and the local preferred-IP pool stay disabled.
-#[[kv_namespaces]]
-#binding = "KV"
-#id = ""
+[[kv_namespaces]]
+binding = "KV"
+id = "1d7830f929bd447da81881c244211022"
+
+[vars]
+PRELOAD_RACE_DIAL = "1"
+PROXY_CONCURRENT_DIAL = "3"
