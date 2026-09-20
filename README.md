@@ -61,14 +61,16 @@ That is why a node connects, the client is happy, and nothing ever loads.
    | `ADMIN` | your password | secret; nothing is served without it |
    | `KEY` | any random string | secret; changes the UUID derivation and enables the `/<KEY>` quick link |
    | `UUID` | a real v4 UUID | optional, otherwise derived from `ADMIN` + `KEY` |
-   | `PROXY_CONCURRENT_DIAL` | `3` | how many egress candidates are dialed at once |
-   | `PRELOAD_RACE_DIAL` | `1` | resolve the target ahead of time and race the addresses |
+   | `PROXY_CONCURRENT_DIAL` | already in `wrangler.toml` | how many egress candidates are dialed at once |
+   | `PRELOAD_RACE_DIAL` | already in `wrangler.toml` | resolve the target ahead of time and race the addresses |
    | `URL` | usually **delete it** | `URL=1101` makes the root path print a fake Cloudflare "Error 1101: Worker threw exception" page as a decoy; that page is not a real failure |
    | `SNI` | leave empty | only meaningful with a custom domain, see the measurement above |
    | `CFPORT` | optional | node port, default `443` |
 
-5. **Settings -> Bindings**: add a KV namespace under the binding name `KV`. Without it the admin
-   panel, the event log and the preferred-IP pool stay disabled.
+5. The KV namespace is bound by `[[kv_namespaces]]` in `wrangler.toml`, so a namespace under the
+   binding name `KV` appears by itself on the next deploy. Without it the admin panel, the event
+   log and the preferred-IP pool stay disabled. To move the worker to another account, create a
+   namespace there, put its id in that block and push.
 6. Push again to redeploy; every commit on `main` deploys automatically.
 
 If a `config.json` from an older build is stored in KV, open `/admin` once and press
