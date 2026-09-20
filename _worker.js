@@ -36,7 +36,7 @@ const panelScript = `var FIELDS = [
   ['randomPath', 'Random path', 'bool']
 ]},
 { t: 'Anti-censorship', f: [
-  ['FRONTSNI', 'Outer SNI shown to the filter, e.g. www.cloudflare.com (empty = same as host)'],
+  ['FRONTSNI', 'Outer SNI - custom domains only, workers.dev answers 403 (leave empty)'],
   ['ECH', 'Use ECH, hides the SNI from the filter', 'bool'],
   ['ECHConfig.SNI', 'ECH inner SNI'],
   ['ECHConfig.DNS', 'DoH resolver used to look up ECH'],
@@ -5870,10 +5870,10 @@ async function readConfigJson(env, hostname, userID, UA = "Mozilla/5.0", shouldR
 			cipherMethod: "aes-128-gcm",
 			TLS: true,
 		},
-		// The ClientHello SNI is what the Iranian filter matches on, while Cloudflare routes a
-		// Worker by the HTTP Host header alone. Sending a benign Cloudflare name in the clear and
-		// keeping the workers.dev name in Host means the client needs neither DNS nor ECH.
-		FRONTSNI: "www.cloudflare.com",
+		// Measured 2026-09-20: Cloudflare answers 403 for a *.workers.dev Host when the ClientHello
+		// SNI names something else, so SNI/Host separation does not work on workers.dev. Kept as an
+		// option for a custom domain, where the origin does honour the Host header. Leave empty here.
+		FRONTSNI: "",
 		Fingerprint: "chrome",
 		preferredSubGen: {
 			local: true, // true: use the local preferred addresses  false: the preferred subscription generator
@@ -5976,8 +5976,7 @@ async function readConfigJson(env, hostname, userID, UA = "Mozilla/5.0", shouldR
 	config_JSON.HOST = host;
 	if (!config_JSON.HOSTS) config_JSON.HOSTS = [hostname];
 	if (env.HOST) config_JSON.HOSTS = (await normalizeToArray(env.HOST)).map(h => h.toLowerCase().replace(/^https?:\/\//, '').split('/')[0].split(':')[0]);
-	// A config saved before this field existed has to get the Iran default, not an empty string.
-	if (config_JSON.FRONTSNI === undefined) config_JSON.FRONTSNI = 'www.cloudflare.com';
+	// Empty FRONTSNI means the node's SNI is its host, which is what workers.dev requires.
 	if (env.SNI !== undefined) config_JSON.FRONTSNI = env.SNI.trim();
 	if (env.CFPORT) config_JSON.preferredSubGen.localIpPool.specifiedPort = Number(env.CFPORT) || 443;
 	config_JSON.UUID = userID;
