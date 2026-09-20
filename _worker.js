@@ -9,7 +9,8 @@ let tcpConcurrentDials = 2, proxyConcurrentDials = 1, preloadRaceDial = false;
 // Public proxyIP endpoints this fork races when no private PROXYIP is configured.
 // They are donated relays: expect them to rotate. Keep the list short - every extra
 // hostname costs one more DoH lookup per dial. Edit here, or set PROXYIP to override.
-const publicProxyPool = ['proxyip.cmliussss.net', 'fra.tp1.090227.xyz', 'sin.tp1.090227.xyz'];
+// Open /admin/pool once logged in to see which of these the edge can still reach.
+const publicProxyPool = ['proxyip.cmliussss.net'];
 const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
 ///////////////////////////////////////////////////////Abuse detection signatures///////////////////////////////////////////////
 const signatureDictionary = [
@@ -35,6 +36,7 @@ const panelScript = `var FIELDS = [
   ['randomPath', 'Random path', 'bool']
 ]},
 { t: 'Anti-censorship', f: [
+  ['FRONTSNI', 'Outer SNI shown to the filter, e.g. www.cloudflare.com (empty = same as host)'],
   ['ECH', 'Use ECH, hides the SNI from the filter', 'bool'],
   ['ECHConfig.SNI', 'ECH inner SNI'],
   ['ECHConfig.DNS', 'DoH resolver used to look up ECH'],
@@ -53,7 +55,7 @@ const panelScript = `var FIELDS = [
   ['preferredSubGen.SUB', 'Remote generator URL'],
   ['preferredSubGen.localIpPool.randomIp', 'Random preferred IPs', 'bool'],
   ['preferredSubGen.localIpPool.randomIpCount', 'Random IP count', 'num'],
-  ['preferredSubGen.localIpPool.specifiedPort', 'Fixed port, -1 for random', 'num'],
+  ['preferredSubGen.localIpPool.specifiedPort', 'Node port; 443 is the only one reliable in Iran', 'num'],
   ['SS.cipherMethod', 'Shadowsocks cipher', 'select', 'aes-128-gcm|aes-256-gcm'],
   ['SS.TLS', 'Shadowsocks over TLS', 'bool']
 ]},
@@ -206,8 +208,8 @@ document.getElementById('tgsave').onclick = function () {
 load().then(function () { say('Loaded.', true); }).catch(function (e) { say('Could not load the configuration: ' + e.message, false); });`;
 const panelHtml = '<!doctype html><html lang="en"><head><meta charset="utf-8">'
 	+ '<meta name="viewport" content="width=device-width,initial-scale=1">'
-	+ '<title>edgetunnel settings</title><style>' + panelStyle + '</style></head><body>'
-	+ '<h1>edgetunnel settings</h1><p class="sub">Iran build. Settings apply to the next subscription fetch.</p>'
+	+ '<title>edt-ir settings</title><style>' + panelStyle + '</style></head><body>'
+	+ '<h1>edt-ir settings</h1><p class="sub">Iran build. Settings apply to the next subscription fetch.</p>'
 	+ '<div class="row"><button id="save">Save</button><button id="reload" class="g">Reload</button>'
 	+ '<button id="logbtn" class="g">Events</button><button id="raw" class="g">Jump to raw JSON</button>'
 	+ '<button id="init" class="w">Reset defaults</button><a href="/logout">Sign out</a></div>'
@@ -220,7 +222,7 @@ const panelHtml = '<!doctype html><html lang="en"><head><meta charset="utf-8">'
 	+ '<div class="row"><button id="tgsave">Save Telegram settings</button><span id="tgstate"></span></div></section>'
 	+ '<script>' + panelScript + '<\/script></body></html>';
 const loginHtml = '<!doctype html><html lang="en"><head><meta charset="utf-8">'
-	+ '<meta name="viewport" content="width=device-width,initial-scale=1"><title>edgetunnel login</title>'
+	+ '<meta name="viewport" content="width=device-width,initial-scale=1"><title>edt-ir login</title>'
 	+ '<style>' + panelStyle + '</style></head><body>'
 	+ '<div style="max-width:360px;margin:12vh auto auto"><h1>Sign in</h1>'
 	+ '<p class="sub">Use the ADMIN value configured on this Worker.</p>'
@@ -425,6 +427,30 @@ export default {
 
 					config_JSON = await readConfigJson(env, host, userID, UA);
 
+					if (accessPath === 'admin/pool') {// Egress diagnostics, measured from the Cloudflare edge rather than from the client
+						const egressTargets = [...new Set(String(defaultProxyIp).split(',').map(s => s.trim()).concat(publicProxyPool, String(env.PROXYIP || '').split(',').map(s => s.trim())))].filter(Boolean);
+						const probe = async (target, path = '/') => {
+							const started = performance.now();
+							try {
+								const res = await fetch(`https://${target}${path}`, { method: 'HEAD', redirect: 'manual', signal: AbortSignal.timeout(5000) });
+								return { target, reachable: true, status: res.status, ms: Math.round(performance.now() - started) };
+							} catch (error) {
+								return { target, reachable: false, error: error.message, ms: Math.round(performance.now() - started) };
+							}
+						};
+						const echDns = /^https?:\/\//.test(String(config_JSON.ECHConfig?.DNS || '')) ? String(config_JSON.ECHConfig.DNS) : '';
+						return new Response(JSON.stringify({
+							workerHost: url.hostname,
+							colo: request.cf.colo,
+							clientIp,
+							kvBound: !!env.KV,
+							frontSNI: config_JSON.FRONTSNI || null,
+							nodePort: config_JSON.preferredSubGen.localIpPool.specifiedPort,
+							egress: await Promise.all(egressTargets.map(target => probe(target))),
+							echBootstrapResolver: echDns ? await probe(new URL(echDns).host, new URL(echDns).pathname + '?name=example.com&type=A') : null
+						}, null, 2), { status: 200, headers: { 'Content-Type': 'application/json;charset=utf-8' } });
+					}
+
 					if (accessPath === 'admin/init') {// Reset the configuration to its defaults
 						try {
 							config_JSON = await readConfigJson(env, host, userID, UA, true);
@@ -566,8 +592,11 @@ export default {
 
 						if (!ua.includes('mozilla')) responseHeaders["Content-Disposition"] = `attachment; filename*=utf-8''${encodeURIComponent(config_JSON.preferredSubGen.SUBNAME)}`;
 						const protocolType = ((url.searchParams.has('surge') || ua.includes('surge')) && config_JSON.protocolType !== 'ss') ? 'tro' + 'jan' : config_JSON.protocolType;
+						// With no converter configured, the locally generated link list goes to every client
+						// type; it is the only output that survives a dead public converter.
+						const localOnly = !config_JSON.subConverterConfig.SUBAPI;
 						let subscriptionContent = '';
-						if (subscriptionType === 'mixed') {
+						if (subscriptionType === 'mixed' || localOnly) {
 							const TLSfragmentParams = config_JSON.TLSfragment == 'Shadowrocket' ? `&fragment=${encodeURIComponent('1,40-60,30-50,tlshello')}` : config_JSON.TLSfragment == 'Happ' ? `&fragment=${encodeURIComponent('3,1,tlshello')}` : '';
 							let fullPreferredIps = [], otherNodesLink = '', proxyIpPool = [];
 
@@ -617,6 +646,8 @@ export default {
 								otherNodesLink += preferredGenOtherNodes;
 							}
 							const ECHLINKparams = config_JSON.ECH ? `&ech=${encodeURIComponent((config_JSON.ECHConfig.SNI ? config_JSON.ECHConfig.SNI + '+' : '') + config_JSON.ECHConfig.DNS)}` : '';
+							const frontSNI = (config_JSON.FRONTSNI || '').trim();
+							const sniParam = frontSNI ? 'sni=__FRONTSNI__' : 'sni=example.com';
 							const isLoonOrSurge = ua.includes('loon') || ua.includes('surge');
 							const { type: transportProtocol, pathFieldName, domainFieldName } = getTransportConfig(config_JSON);
 							subscriptionContent = otherNodesLink + fullPreferredIps.map(rawAddress => {
@@ -669,9 +700,9 @@ export default {
 									return `${protocolType}://${btoa(config_JSON.SS.cipherMethod + ':00000000-0000-4000-8000-000000000000')}@${nodeAddress}:${nodePort}?plugin=v2${encodeURIComponent('ray-plugin;mode=websocket;host=example.com;path=' + (config_JSON.randomPath ? randomPath(fullNodePath) : fullNodePath) + (config_JSON.SS.TLS ? ';tls' : '')) + ECHLINKparams + TLSfragmentParams}#${encodeURIComponent(nodeRemark)}`;
 								} else {
 									const transportPathValue = getTransportPathValue(config_JSON, fullNodePath, asPreferredSubGen);
-									return `${protocolType}://00000000-0000-4000-8000-000000000000@${nodeAddress}:${nodePort}?security=tls&type=${transportProtocol + ECHLINKparams}&${domainFieldName}=example.com&fp=${config_JSON.Fingerprint}&sni=example.com&${pathFieldName}=${encodeURIComponent(transportPathValue) + TLSfragmentParams}&encryption=none&alpn=${encodeURIComponent(config_JSON.ALPN)}#${encodeURIComponent(nodeRemark)}`;
+									return `${protocolType}://00000000-0000-4000-8000-000000000000@${nodeAddress}:${nodePort}?security=tls&type=${transportProtocol + ECHLINKparams}&${domainFieldName}=example.com&fp=${config_JSON.Fingerprint}&${sniParam}&${pathFieldName}=${encodeURIComponent(transportPathValue) + TLSfragmentParams}&encryption=none&alpn=${encodeURIComponent(config_JSON.ALPN)}#${encodeURIComponent(nodeRemark)}`;
 								}
-							}).filter(item => item !== null).join('\n');
+							}).filter(item => item !== null).join('\n').replace(/__FRONTSNI__/g, frontSNI);
 						} else { // Subscription conversion
 							const subConverterUrl = `${config_JSON.subConverterConfig.SUBAPI}/sub?target=${subscriptionType}&url=${encodeURIComponent(url.protocol + '//' + url.host + '/sub?target=mixed&token=' + todaySubConverterToken + '&cnIspCode=' + detectIsp(request) + (url.searchParams.has('sub') && url.searchParams.get('sub') != '' ? `&sub=${url.searchParams.get('sub')}` : ''))}&config=${encodeURIComponent(config_JSON.subConverterConfig.SUBCONFIG)}&emoji=${config_JSON.subConverterConfig.SUBEMOJI}&list=${config_JSON.subConverterConfig.SUBLIST}&scv=${config_JSON.skipCertVerify}&xudp=${config_JSON.subConverterConfig.XUDP}&udp=${config_JSON.subConverterConfig.UDP}&tls13=${config_JSON.subConverterConfig.TLS13}&append_type=${config_JSON.subConverterConfig.APPEND_TYPE}&sort=${config_JSON.subConverterConfig.SORT}`;
 							try {
@@ -701,12 +732,12 @@ export default {
 								});
 						}
 
-						if (subscriptionType === 'mixed' && (!ua.includes('mozilla') || url.searchParams.has('b64') || url.searchParams.has('base64'))) subscriptionContent = btoa(subscriptionContent);
+						if ((subscriptionType === 'mixed' || localOnly) && (!ua.includes('mozilla') || url.searchParams.has('b64') || url.searchParams.has('base64'))) subscriptionContent = btoa(subscriptionContent);
 
-						if (subscriptionType === 'singbox') {
+						if (!localOnly && subscriptionType === 'singbox') {
 							subscriptionContent = await SingboxapplySubConfigHotPatch(subscriptionContent, config_JSON);
 							responseHeaders["content-type"] = 'application/json; charset=utf-8';
-						} else if (subscriptionType === 'clash') {
+						} else if (!localOnly && subscriptionType === 'clash') {
 							subscriptionContent = ClashapplySubConfigHotPatch(subscriptionContent, config_JSON);
 							responseHeaders["content-type"] = 'application/x-yaml; charset=utf-8';
 						}
@@ -5839,21 +5870,27 @@ async function readConfigJson(env, hostname, userID, UA = "Mozilla/5.0", shouldR
 			cipherMethod: "aes-128-gcm",
 			TLS: true,
 		},
+		// The ClientHello SNI is what the Iranian filter matches on, while Cloudflare routes a
+		// Worker by the HTTP Host header alone. Sending a benign Cloudflare name in the clear and
+		// keeping the workers.dev name in Host means the client needs neither DNS nor ECH.
+		FRONTSNI: "www.cloudflare.com",
 		Fingerprint: "chrome",
 		preferredSubGen: {
 			local: true, // true: use the local preferred addresses  false: the preferred subscription generator
 			localIpPool: {
 				randomIp: true, // Only takes effect when the random IP option is true: how many random IPs to build, otherwise use the ADD.txt kept in KV
 				randomIpCount: 16,
-				specifiedPort: -1,
+				specifiedPort: 443, // Non-443 Cloudflare ports are reset on Iranian links, so pin 443
 			},
 			SUB: null,
-			SUBNAME: "edge" + "tunnel",
+			SUBNAME: "edt-ir",
 			SUBUpdateTime: 3, // subscription refresh interval (hours)
 			TOKEN: await MD5MD5(hostname + userID),
 		},
 		subConverterConfig: {
-			SUBAPI: `https://SUBAPI.${signatureDictionary[1]}ssss.net`,
+			// Empty means no external converter: every client type gets the locally generated
+			// base64 node list, which is what still works when the public converters are gone.
+			SUBAPI: '',
 			SUBCONFIG: `https://raw.githubusercontent.com/${signatureDictionary[1]}/ACL4SSR/refs/heads/main/Clash/config/ACL4SSR_Online_Mini_MultiMode_CF.ini`,
 			SUBEMOJI: false,
 			SUBLIST: false, //output node information only
@@ -5939,6 +5976,10 @@ async function readConfigJson(env, hostname, userID, UA = "Mozilla/5.0", shouldR
 	config_JSON.HOST = host;
 	if (!config_JSON.HOSTS) config_JSON.HOSTS = [hostname];
 	if (env.HOST) config_JSON.HOSTS = (await normalizeToArray(env.HOST)).map(h => h.toLowerCase().replace(/^https?:\/\//, '').split('/')[0].split(':')[0]);
+	// A config saved before this field existed has to get the Iran default, not an empty string.
+	if (config_JSON.FRONTSNI === undefined) config_JSON.FRONTSNI = 'www.cloudflare.com';
+	if (env.SNI !== undefined) config_JSON.FRONTSNI = env.SNI.trim();
+	if (env.CFPORT) config_JSON.preferredSubGen.localIpPool.specifiedPort = Number(env.CFPORT) || 443;
 	config_JSON.UUID = userID;
 	if (!config_JSON.randomPath) config_JSON.randomPath = false;
 	if (!config_JSON.enable0Rtt) config_JSON.enable0Rtt = false;

@@ -1,109 +1,144 @@
-# edgetunnel - Iran build
+# edt-ir - a Cloudflare Worker proxy tuned for Iran
 
-A Cloudflare Worker that terminates VLESS / Trojan / Shadowsocks at the edge and forwards the
-traffic to a proxyIP backend. This build is tuned for the Iranian filtering environment: the
-default egress is a **raced pool of public proxyIP endpoints** instead of a single random one,
-and the settings panel is served by the worker itself, so nothing is fetched from a third-party
-page.
-
-Everything in this repository is in English and the whole file set is checked in CI for CJK
-characters.
+One `_worker.js`, no build step. It terminates VLESS / Trojan / Shadowsocks at the Cloudflare edge
+and forwards the traffic out through a proxyIP relay. It is tuned for what an Iranian line
+actually does in September 2026: DNS lies, non-standard ports get reset, and the clear-text SNI is
+what the filter matches on.
 
 * No backend server, no domain, no cost: runs on the Cloudflare free plan at `*.workers.dev`.
 * Requires: a Cloudflare account, a GitHub account.
+* Everything in this repository is English; CI rejects any CJK character in tracked files.
 
-Based on [cmliu/edgetunnel](https://github.com/cmliu/edgetunnel) (GNU GPL-2.0, see `LICENSE`).
+Licensed under GNU GPL-2.0, see `LICENSE`.
 
 ---
 
-## What this build changes
+## Measured on an Iranian line (2026-09-20, no proxy, Windows `curl` 8.19)
 
-| Area | Upstream | This build |
+| Probe | Result | What it means |
 | --- | --- | --- |
-| Egress when `PROXYIP` is unset | one donated endpoint per request | the colo default **plus** `publicProxyPool` are shuffled and raced; the direct fallback stays on |
-| Egress when `PROXYIP` is set | picks one entry at random and **disables** the fallback | your whole list is deduplicated, shuffled and raced in batches; the fallback stays off, as intended |
-| Admin UI | fetched from a remote Chinese pages site | generated inside the worker (`/login`, `/admin`), English only |
-| Language | Chinese identifiers, comments and strings | English throughout; CI fails the build if any CJK character returns |
-| Self-certification comment block | present in the header | removed |
+| `*.workers.dev` through the ISP resolver | no answer at all | DNS is poisoned, so a client that resolves the node name never gets there |
+| TLS to a Cloudflare IP, SNI `*.workers.dev` | handshake succeeded, HTTP 403 (a name that has no worker) | the SNI itself is **not** reset - reaching the edge by IP works |
+| SNI `www.cloudflare.com` + `Host: <name>.workers.dev` | answered by the workers.dev handler | Cloudflare routes by the Host header, so the clear-text SNI can be a harmless name |
+| `https://speed.cloudflare.com`, `github.com`, `www.google.com` | HTTP 200 | the line is up, this is targeting not an outage |
+| `dns.alidns.com/dns-query` | handshake aborted mid-TLS | the ECH bootstrap this project used to recommend is dead here |
+| `cloudflare-dns.com`, `dns.google` | connection reset | DoH is blocked |
+| `mozilla.cloudflare-dns.com`, `quad9`, `dns.sb`, `opendns` | no answer | DoH is blocked |
+| `*.pages.dev`, `*.eu.org` | sinkholed into `10.10.34.x` | the free-domain detours are poisoned too |
+| `proxyip.cmliussss.net`, `fra./sin.tp1.090227.xyz` | TLS aborted | donated relays die; `tp1` is gone from the pool |
 
-Protocol behaviour, link formats, xHTTP/gRPC handling and the KV config schema are unchanged
-apart from the key names being English now.
+Four consequences drive every default below: never make the client resolve anything, never make it
+depend on a DoH lookup, stay on port 443, and ship diagnostics because relays rot.
+
+## What this build does
+
+| Area | Behaviour |
+| --- | --- |
+| Node address | a literal Cloudflare IPv4 on **443**, so DNS poisoning is irrelevant |
+| Node `host` | your `*.workers.dev` hostname - this is what Cloudflare routes on |
+| Node `sni` | `www.cloudflare.com` by default (the **Outer SNI** field), so the filter sees an ordinary Cloudflare name; the certificate it presents matches that name, so verification still passes |
+| Egress with `PROXYIP` unset | the colo default plus `publicProxyPool`, shuffled and raced in batches, direct fallback on |
+| Egress with `PROXYIP` set | your whole list deduplicated, shuffled, raced; fallback off, as asked |
+| Subscription output | generated locally for every client type - the public converter APIs are dead, so no external converter is called by default |
+| Diagnostics | `/admin/pool` probes every egress target and the ECH resolver **from the edge** and returns timings as JSON |
+| Admin UI | served by the worker itself (`/login`, `/admin`), nothing fetched from a third-party page |
+| Language | English identifiers, comments, strings and config keys throughout |
 
 ## Deploy
 
-1. Push this repository to your GitHub account (done).
-2. Cloudflare dashboard -> **Workers & Pages** -> **Create** -> **Deploy from Git**.
-   If the GitHub connection is missing, add it first from the account-level
-   **Settings -> Git integration** and grant access to this repository only.
-3. Pick this repo, production name `edt-ir`, and leave the build settings at their defaults -
-   `wrangler.toml` already points `main` at `_worker.js`.
-4. Open the worker -> **Settings -> Variables and Secrets** (or Environment variables) and add:
+1. This repository is already on your GitHub account.
+2. Cloudflare dashboard -> **Workers & Pages** -> **Create** -> **Deploy from Git**. If the GitHub
+   connection is missing, add it under account **Settings -> Git integration** and grant this
+   repository only.
+3. Pick this repo, production name `edt-ir`, default build settings - `wrangler.toml` points `main`
+   at `_worker.js`.
+4. Worker -> **Settings -> Variables and Secrets**:
 
    | Variable | Value | Notes |
    | --- | --- | --- |
    | `ADMIN` | your password | secret; nothing is served without it |
-   | `KEY` | any random string | secret; changes the UUID derivation and enables the `/<KEY>` quick-subscription link |
-   | `UUID` | a real v4 UUID | optional, otherwise the UUID is derived from `ADMIN` + `KEY` |
-   | `PROXY_CONCURRENT_DIAL` | `3` | how many proxyIP candidates are dialed at once |
+   | `KEY` | any random string | secret; changes the UUID derivation and enables the `/<KEY>` quick link |
+   | `UUID` | a real v4 UUID | optional, otherwise derived from `ADMIN` + `KEY` |
+   | `PROXY_CONCURRENT_DIAL` | `3` | how many egress candidates are dialed at once |
    | `PRELOAD_RACE_DIAL` | `1` | resolve the target ahead of time and race the addresses |
+   | `SNI` | optional | overrides the Outer SNI; set it empty to put the workers.dev name back in the clear |
+   | `CFPORT` | optional | node port, default `443` |
 
 5. **Settings -> Bindings**: add a KV namespace under the binding name `KV`. Without it the admin
-   panel, the event log and the local preferred-IP pool stay disabled.
-6. Deploy again if you changed anything after the first build.
+   panel, the event log and the preferred-IP pool stay disabled.
+6. Push again to redeploy; every commit on `main` deploys automatically.
 
-If you had a `config.json` stored in KV from an earlier upstream build, open `/admin` once and
-press **Reset defaults**: the stored keys were Chinese, the worker now expects English ones.
+If a `config.json` from an older build is stored in KV, open `/admin` once and press
+**Reset defaults** - the old keys were Chinese and are ignored now.
 
-## Recommended client settings for Iran
+## Settings to use
 
-Open `https://<your-worker>.workers.dev/admin`, sign in with the `ADMIN` value, and set:
+Open `https://<your-worker>.workers.dev/admin`, sign in with the `ADMIN` value, and check:
 
 | Field | Value | Why |
 | --- | --- | --- |
-| Use ECH | on | hides the `SNI` from the filter; the only practical answer for `workers.dev` |
-| ECH inner SNI | `cloudflare-ech.com` | the name the ECH lookup asks for |
-| ECH DoH resolver | `https://dns.alidns.com/dns-query` | reachable from inside Iran, unlike Google DoH |
-| ClientHello fragmentation | `Shadowrocket` or `Happ` | splits the handshake so the middlebox cannot read the SNI |
-| Protocol / Transport | `vless` / `ws` | the best-tested path |
+| Outer SNI | `www.cloudflare.com` | the only field the filter can read, so it should not be your hostname |
+| Protocol / Transport | `vless` / `ws` | the best-tested path on `workers.dev` |
 | uTLS fingerprint | `chrome` | matches a real browser handshake |
-| Refresh interval (hours) | `3` | `workers.dev` addresses get re-classified often |
-| Skip certificate verify | off | not needed, the edge presents a valid certificate |
+| ClientHello fragmentation | `Shadowrocket` or `Happ` | splits the handshake; helps on lossy MCI/Irancell links even though DPI can reassemble |
+| Node port | `443` | every other Cloudflare port gets reset on Iranian links |
+| Refresh interval (hours) | `3` | egress relays and IP ranges get re-classified often |
+| Use ECH | **off** | see the caveat below |
+| Skip certificate verify | off | not needed, the edge presents a valid certificate for the Outer SNI |
 
-Copy the **Subscription URL** from the panel into your client. Recent clients that support ECH:
-v2rayNG, Streisand, Happ, Shadowrocket, sing-box.
+**The ECH caveat, honestly.** The `ECH` switch only appends an `&ech=<inner SNI>+<DoH URL>` hint to
+the link. Without a reachable DoH resolver that fetches a real `ECHConfigList`, no ECH handshake
+happens and the outer SNI stays in the clear - and every resolver this build used to recommend is
+blocked from an Iranian line (table above). Leave it off and use the Outer SNI field. Real ECH is
+still possible if you hand the client a pre-supplied `ECHConfigList` (sing-box `tls.ech`, no DoH
+needed), but that is client configuration, not something this worker can fake for you.
+
+## Reading the subscription when DNS is poisoned
+
+The subscription URL itself lives on `*.workers.dev`, which your resolver will not answer. Three
+ways around it, in order of preference:
+
+1. **Import the node links, not the subscription.** Each generated link carries a literal IP, so
+   once it is in the client no DNS is needed ever again. The panel shows the links; paste them.
+2. **Pin the name in the OS hosts file** on a machine that can reach the panel, then refresh at
+   will. On Windows (as Administrator):
+   `Add-Content -Path C:\Windows\System32\drivers\etc\hosts -Value "104.16.132.229  <your-worker>.workers.dev"`
+3. **A client that resolves through its own remote DNS** (sing-box / NekoBox with a DoH server you
+   have verified is reachable) - given the table above, do not count on this.
 
 ## The public proxyIP pool
 
-`_worker.js` near the top holds the list that gets raced:
+At the top of `_worker.js`:
 
 ```
-const publicProxyPool = ['proxyip.cmliussss.net', 'fra.tp1.090227.xyz', 'sin.tp1.090227.xyz'];
+const publicProxyPool = ['proxyip.cmliussss.net'];
 ```
 
-These are donated relays, not infrastructure you own. Expect them to change. Keep the list short:
-every extra hostname costs one more DNS-over-HTTPS lookup per dial. To replace the pool, set the
-`PROXYIP` variable to your own comma-separated list - your own backend is always the reliable
-option, and a private proxyIP or a VPS with SOCKS/HTTP is cheap or free to run.
+These are donated relays, not infrastructure you own, and they are the single weakest link in this
+design - when they die, the subscription imports and connects but nothing comes out. Check
+`/admin/pool` before blaming the client: it dials every candidate from the Cloudflare edge and
+reports status and milliseconds. The durable fix is your own egress: a private proxyIP, a friend's
+VPS with SOCKS/HTTP, or the `PROXYIP` variable with your own comma-separated list.
 
 ## Troubleshooting
 
-1. `https://speed.cloudflare.com/__down?bytes=10` from the same device and network. If *that*
-   fails, the problem is `workers.dev` being filtered at your ISP, not the worker. Try a mobile
-   internet connection or a different DNS.
-2. Worker root URL without a password returns a page that says no admin password is configured -
-   that confirms the code is deployed and running.
-3. `/admin` bouncing back to `/login` after a correct password means the user agent changed
-   between requests; the session cookie is bound to it.
-4. A subscription that imports but never connects: open the panel, check the egress field is not
-   empty, raise `PROXY_CONCURRENT_DIAL` to `4`, then test a node with a different remark.
-5. Free plan gives 100,000 requests per day for the whole worker; every proxied connection is one
-   request, so a busy household can exhaust it by midday.
+1. Node connects but nothing loads: open `/admin/pool` and look for a target with `reachable: true`.
+2. `https://speed.cloudflare.com/__down?bytes=10` from the same device and network - if that fails,
+   the ISP is the problem, not the worker.
+3. Worker root URL without a password shows "No admin password configured" - that proves the code
+   is deployed and running.
+4. `/admin` bouncing back to `/login` after a correct password: the user agent changed between
+   requests, the session cookie is bound to it.
+5. A client error that mentions a handshake or an unexpected certificate: clear the Outer SNI field
+   (or set `SNI=` empty) - that client did not accept SNI/Host separation.
+6. Free plan gives 100,000 requests per day for the whole worker, and every proxied connection is
+   one request, so a busy household can exhaust it by midday.
 
 ## Development
 
 ```
-node --check _worker.js     # the file is a single ES module, no build step
+node --check _worker.js     # single ES module, no build step
 ```
 
-The GitHub **Verify** workflow runs the same check on every push, rejects any CJK character in
-tracked files, and fails if the worker starts depending on a remote admin page again.
+The GitHub **Verify** workflow runs that check on every push, rejects CJK characters in tracked
+files, and fails if the worker starts depending on a remote admin page again.
