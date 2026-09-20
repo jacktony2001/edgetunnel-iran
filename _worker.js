@@ -302,6 +302,36 @@ export default {
 		} else {
 			if (url.protocol === 'http:') return Response.redirect(url.href.replace(`http://${url.hostname}`, `https://${url.hostname}`), 301);
 			if (!adminPassword) return noticePage('No admin password configured', 'Add the ADMIN variable to this Worker (Settings -&gt; Variables) and deploy again. Until then only the proxy endpoints are served.');
+			if (accessPath === 'admin/pool') {// Egress diagnostics; deliberately outside the KV gate, because a worker with no KV is exactly when this is needed
+				const cookies = request.headers.get('Cookie') || '';
+				const authCookie = cookies.split(';').find(c => c.trim().startsWith('auth='))?.split('=')[1];
+				if (!authCookie || authCookie !== await MD5MD5(UA + accessKey + adminPassword)) return new Response('Redirecting...', { status: 302, headers: { 'Location': '/login' } });
+				const egressTargets = [...new Set(String(defaultProxyIp).split(',').map(s => s.trim()).concat(publicProxyPool, String(env.PROXYIP || '').split(',').map(s => s.trim())))].filter(Boolean);
+				const probe = async (target, path = '/') => {
+					const started = performance.now();
+					try {
+						const res = await fetch(`https://${target}${path}`, { method: 'HEAD', redirect: 'manual', signal: AbortSignal.timeout(5000) });
+						return { target, reachable: true, status: res.status, ms: Math.round(performance.now() - started) };
+					} catch (error) {
+						return { target, reachable: false, error: error.message, ms: Math.round(performance.now() - started) };
+					}
+				};
+				const diagnostics = {
+					workerHost: url.hostname,
+					colo: request.cf.colo,
+					clientIp,
+					kvBound: !!(env.KV && typeof env.KV.get === 'function'),
+					egress: await Promise.all(egressTargets.map(target => probe(target)))
+				};
+				if (diagnostics.kvBound) {
+					config_JSON = await readConfigJson(env, host, userID, UA);
+					const echDns = /^https?:\/\//.test(String(config_JSON.ECHConfig?.DNS || '')) ? String(config_JSON.ECHConfig.DNS) : '';
+					diagnostics.frontSNI = config_JSON.FRONTSNI || null;
+					diagnostics.nodePort = config_JSON.preferredSubGen.localIpPool.specifiedPort;
+					diagnostics.echBootstrapResolver = echDns ? await probe(new URL(echDns).host, new URL(echDns).pathname + '?name=example.com&type=A') : null;
+				}
+				return new Response(JSON.stringify(diagnostics, null, 2), { status: 200, headers: { 'Content-Type': 'application/json;charset=utf-8' } });
+			}
 			if (env.KV && typeof env.KV.get === 'function') {
 				const caseSensitivePath = url.pathname.slice(1);
 				if (caseSensitivePath === accessKey && accessKey !== 'do not modify this default key; if needed, add the KEY variable to change it') {//Quick subscription
@@ -426,30 +456,6 @@ export default {
 					}
 
 					config_JSON = await readConfigJson(env, host, userID, UA);
-
-					if (accessPath === 'admin/pool') {// Egress diagnostics, measured from the Cloudflare edge rather than from the client
-						const egressTargets = [...new Set(String(defaultProxyIp).split(',').map(s => s.trim()).concat(publicProxyPool, String(env.PROXYIP || '').split(',').map(s => s.trim())))].filter(Boolean);
-						const probe = async (target, path = '/') => {
-							const started = performance.now();
-							try {
-								const res = await fetch(`https://${target}${path}`, { method: 'HEAD', redirect: 'manual', signal: AbortSignal.timeout(5000) });
-								return { target, reachable: true, status: res.status, ms: Math.round(performance.now() - started) };
-							} catch (error) {
-								return { target, reachable: false, error: error.message, ms: Math.round(performance.now() - started) };
-							}
-						};
-						const echDns = /^https?:\/\//.test(String(config_JSON.ECHConfig?.DNS || '')) ? String(config_JSON.ECHConfig.DNS) : '';
-						return new Response(JSON.stringify({
-							workerHost: url.hostname,
-							colo: request.cf.colo,
-							clientIp,
-							kvBound: !!env.KV,
-							frontSNI: config_JSON.FRONTSNI || null,
-							nodePort: config_JSON.preferredSubGen.localIpPool.specifiedPort,
-							egress: await Promise.all(egressTargets.map(target => probe(target))),
-							echBootstrapResolver: echDns ? await probe(new URL(echDns).host, new URL(echDns).pathname + '?name=example.com&type=A') : null
-						}, null, 2), { status: 200, headers: { 'Content-Type': 'application/json;charset=utf-8' } });
-					}
 
 					if (accessPath === 'admin/init') {// Reset the configuration to its defaults
 						try {

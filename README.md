@@ -103,6 +103,7 @@ The node tunnels to Cloudflare fine; the missing piece is where Cloudflare forwa
 
 1. Look first: open `https://<your-worker>.workers.dev/admin/pool` while signed in. Every egress
    candidate is dialed **from the edge**, and you get `reachable`, an HTTP status and milliseconds.
+   This endpoint only needs the login cookie, so it answers even before `KV` is bound.
 2. If nothing is reachable, no client setting will help - you need egress. The options, cheapest
    first: a donated proxyIP that is currently alive (drop its hostname in `PROXYIP`), a friend's
    VPS with SOCKS/HTTP, or your own free-tier box running a relay.
