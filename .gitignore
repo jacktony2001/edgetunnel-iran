@@ -1,25 +1,20 @@
-# Demo 目录
+# Local scratch
 demo/
 tmp/
 .workbuddy/
 
-# 依赖包
+# Dependencies
 node_modules/
 package-lock.json
 yarn.lock
 pnpm-lock.yaml
 
-# 构建产物
-dist/
-build/
-*.wasm
-GRAINTCP_*
-
 # Cloudflare Workers
 .wrangler/
+*.wasm
 wrangler-install.log
 
-# IDE
+# Editors
 .vscode/
 .idea/
 *.swp
@@ -27,14 +22,11 @@ wrangler-install.log
 *~
 .DS_Store
 
-# 环境配置
+# Secrets and logs
 .env
 .env.local
 .env.*.local
-
-# 日志文件
 *.log
 npm-debug.log*
-yarn-debug.log*
 yarn-error.log*
 log/

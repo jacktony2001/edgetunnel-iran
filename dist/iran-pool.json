@@ -1,9 +1,0 @@
-{
-  "comment": "Endpoints the Iran build races against, in addition to the built-in per-colo default. Keep this list short: every hostname costs one extra DoH lookup per connection. You can also set the PROXYIP env var, both are merged.",
-  "updated": "2026-09-19",
-  "pool": [
-    "proxyip.cmliussss.net",
-    "fra.tp1.090227.xyz",
-    "sin.tp1.090227.xyz"
-  ]
-}

@@ -1,8 +1,10 @@
 name = "edt-ir"
-main = "dist/_worker.js"
+main = "_worker.js"
 compatibility_date = "2025-11-04"
 keep_vars = true
 
+# Bind a Workers KV namespace under the binding name "KV".
+# Without it the admin panel and the local preferred-IP pool stay disabled.
 #[[kv_namespaces]]
-#binding = "KV"			#KV绑定名默认不可修改
-#id = ""				#KV数据库id
+#binding = "KV"
+#id = ""

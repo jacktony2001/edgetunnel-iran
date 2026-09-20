@@ -1,0 +1,46 @@
+name: Verify
+
+on:
+  push:
+    paths:
+      - "_worker.js"
+      - ".github/workflows/verify.yml"
+  pull_request:
+    paths:
+      - "_worker.js"
+  workflow_dispatch:
+  schedule:
+    - cron: "30 5 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      - name: Syntax check
+        run: node --check _worker.js
+
+      - name: No CJK characters anywhere in the repository
+        run: |
+          hits=$(git ls-files | xargs -r grep -lP '[\x{4E00}-\x{9FFF}\x{3040}-\x{30FF}\x{AC00}-\x{D7AF}]' || true)
+          if [ -n "$hits" ]; then
+            echo "CJK characters found in:"
+            echo "$hits"
+            exit 1
+          fi
+          echo "All tracked files are CJK-free."
+
+      - name: Entry point and settings sanity
+        run: |
+          grep -q 'main = "_worker.js"' wrangler.toml || { echo "wrangler.toml must point at _worker.js"; exit 1; }
+          grep -q 'publicProxyPool' _worker.js || { echo "public proxyIP pool is missing"; exit 1; }
+          grep -q 'edt-pages' _worker.js && { echo "worker still depends on the remote admin page"; exit 1; }
+          echo "lines: $(wc -l < _worker.js)  bytes: $(wc -c < _worker.js)"
