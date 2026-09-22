@@ -1,4 +1,4 @@
-# edt-ir - a Cloudflare Worker proxy tuned for Iran
+# edgetunnel-iran - a Cloudflare Worker proxy tuned for Iran
 
 One `_worker.js`, no build step. It terminates VLESS / Trojan / Shadowsocks at the Cloudflare edge
 and forwards the traffic out through a proxyIP relay. Everything it defaults to is based on what
@@ -6,7 +6,7 @@ was measured on a real Iranian line, not on what upstream documentation claims.
 
 * No backend server, no domain, no cost: runs on the Cloudflare free plan at `*.workers.dev`.
 * Requires: a Cloudflare account, a GitHub account.
-* Everything in this repository is English; CI rejects any CJK character in tracked files.
+* Everything in this repository is English; CI rejects any CJK, Arabic/Persian or Cyrillic character in tracked files.
 
 Licensed under GNU GPL-2.0, see `LICENSE`.
 
@@ -130,5 +130,6 @@ The node tunnels to Cloudflare fine; the missing piece is where Cloudflare forwa
 node --check _worker.js     # single ES module, no build step
 ```
 
-The GitHub **Verify** workflow runs that check on every push, rejects CJK characters in tracked
-files, and fails if the worker starts depending on a remote admin page again.
+The GitHub **Verify** workflow runs that check on every push, rejects any non-Latin script (CJK,
+Arabic/Persian, Cyrillic) in tracked files, and fails if the worker starts depending on a remote
+admin page again.
