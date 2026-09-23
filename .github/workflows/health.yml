@@ -1,0 +1,92 @@
+name: Worker health
+
+on:
+  schedule:
+    - cron: "7,37 * * * *"
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe the worker
+        id: probe
+        run: |
+          url="https://edgetunnel-iran.halmsal.workers.dev"
+          state="down"
+          detail=""
+          for attempt in 1 2 3; do
+            code=$(curl -sS -o /tmp/root.html -w "%{http_code}" --max-time 20 "$url" || echo 000)
+            login=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 20 "$url/login" || echo 000)
+            detail="attempt $attempt: root=$code login=$login"
+            if grep -qi "1101" /tmp/root.html 2>/dev/null; then
+              state="exception"
+              break
+            fi
+            if [ "$code" = "200" ] && [ "$login" = "200" ]; then
+              state="ok"
+              break
+            fi
+            sleep 20
+          done
+          echo "state=$state" >> "$GITHUB_OUTPUT"
+          echo "detail=$detail" >> "$GITHUB_OUTPUT"
+          echo "state=$state ($detail)"
+
+      - name: Open or close the issue
+        uses: actions/github-script@v7
+        env:
+          STATE: ${{ steps.probe.outputs.state }}
+          DETAIL: ${{ steps.probe.outputs.detail }}
+        with:
+          script: |
+            const title = '[worker-health] edgetunnel-iran worker problem';
+            const state = process.env.STATE;
+            const detail = process.env.DETAIL;
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const now = new Date().toISOString();
+            const open = (await github.rest.issues.listForRepo({
+              owner, repo, state: 'open', per_page: 100,
+            })).data.find((i) => i.title === title);
+
+            if (state === 'ok') {
+              if (open) {
+                await github.rest.issues.createComment({
+                  owner, repo, issue_number: open.number,
+                  body: `Recovered at ${now} (${detail}). Closing.`,
+                });
+                await github.rest.issues.update({
+                  owner, repo, issue_number: open.number, state: 'closed',
+                });
+              }
+              return;
+            }
+
+            const explanation = state === 'exception'
+              ? 'The root page answered with Error 1101 - the worker JavaScript threw an exception (a code bug, not a suspension).'
+              : 'The worker did not answer - it was likely removed or disabled by Cloudflare, or the account has an issue.';
+            const body = [
+              `Detected at ${now}. ${explanation}`,
+              '',
+              `Probe result: ${detail}`,
+              '',
+              'Recovery:',
+              '1. Live exception log: `XDG_CONFIG_HOME=... wrangler tail` (shows the throwing line if it is a code bug).',
+              '2. Missing/disabled worker: check the Cloudflare dashboard and the account email, then run the `Deploy` workflow in the Actions tab (requires the `CLOUDFLARE_API_TOKEN` secret) or run `wrangler deploy` locally.',
+            ].join('\n');
+
+            if (open) {
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: open.number,
+                body: `Still failing at ${now}: ${detail}`,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner, repo, title, body, labels: [],
+              });
+            }

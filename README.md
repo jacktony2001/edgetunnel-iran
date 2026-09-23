@@ -134,3 +134,16 @@ node --check _worker.js     # single ES module, no build step
 The GitHub **Verify** workflow runs that check on every push, rejects any non-Latin script (CJK,
 Arabic/Persian, Cyrillic) in tracked files, and fails if the worker starts depending on a remote
 admin page again.
+
+Two more workflows guard the live worker:
+
+* **Worker health** probes the deployed worker every 30 minutes. If the root page ever answers
+  with `Error 1101` (the worker JavaScript threw) or stops answering altogether (the worker was
+  removed or disabled), it opens a repository issue with the probe result and recovery steps, and
+  closes it automatically once the worker responds again - so a suspension is never discovered
+  by accident weeks later.
+* **Deploy** redeploys the worker from the Actions tab with one click, which is the fastest
+  recovery path after a removal. It needs the `CLOUDFLARE_API_TOKEN` repository secret
+  (Cloudflare dashboard -> API Tokens -> "Edit Cloudflare Workers" template plus Workers KV
+  Storage: Edit); without the secret it fails with instructions instead of a confusing error.
+  Add `push: branches: [main]` to its trigger if you want auto-deploy on every push.
