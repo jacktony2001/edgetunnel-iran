@@ -5673,8 +5673,16 @@ function randomPath(fullNodePath = "/") {
 	const commonPathWords = ["about", "account", "acg", "act", "activity", "ad", "ads", "ajax", "album", "albums", "anime", "api", "app", "apps", "archive", "archives", "article", "articles", "ask", "auth", "avatar", "bbs", "bd", "blog", "blogs", "book", "books", "bt", "buy", "cart", "category", "categories", "cb", "channel", "channels", "chat", "china", "city", "class", "classify", "clip", "clips", "club", "cn", "code", "collect", "collection", "comic", "comics", "community", "company", "config", "contact", "content", "course", "courses", "cp", "data", "detail", "details", "dh", "directory", "discount", "discuss", "dl", "dload", "doc", "docs", "document", "documents", "doujin", "download", "downloads", "drama", "edu", "en", "ep", "episode", "episodes", "event", "events", "f", "faq", "favorite", "favourites", "favs", "feedback", "file", "files", "film", "films", "forum", "forums", "friend", "friends", "game", "games", "gif", "go", "go.html", "go.php", "group", "groups", "help", "home", "hot", "htm", "html", "image", "images", "img", "index", "info", "intro", "item", "items", "ja", "jp", "jump", "jump.html", "jump.php", "jumping", "knowledge", "lang", "lesson", "lessons", "lib", "library", "link", "links", "list", "live", "lives", "m", "mag", "magnet", "mall", "manhua", "map", "member", "members", "message", "messages", "mobile", "movie", "movies", "music", "my", "new", "news", "note", "novel", "novels", "online", "order", "out", "out.html", "out.php", "outbound", "p", "page", "pages", "pay", "payment", "pdf", "photo", "photos", "pic", "pics", "picture", "pictures", "play", "player", "playlist", "post", "posts", "product", "products", "program", "programs", "project", "qa", "question", "rank", "ranking", "read", "readme", "redirect", "redirect.html", "redirect.php", "reg", "register", "res", "resource", "retrieve", "sale", "search", "season", "seasons", "section", "seller", "series", "service", "services", "setting", "settings", "share", "shop", "show", "shows", "site", "soft", "sort", "source", "special", "star", "stars", "static", "stock", "store", "stream", "streaming", "streams", "student", "study", "tag", "tags", "task", "teacher", "team", "tech", "temp", "test", "thread", "tool", "tools", "topic", "topics", "torrent", "trade", "travel", "tv", "txt", "type", "u", "upload", "uploads", "url", "urls", "user", "users", "v", "version", "videos", "view", "vip", "vod", "watch", "web", "wenku", "wiki", "work", "www", "zh", "zh-cn", "zh-tw", "zip"];
 	const randomDirCount = Math.floor(Math.random() * 3 + 1);
 	const randomPath = commonPathWords.sort(() => 0.5 - Math.random()).slice(0, randomDirCount).join('/');
-	if (fullNodePath === "/") return `/${randomPath}`;
-	else return `/${randomPath + fullNodePath.replace('/?', '?')}`;
+	if (fullNodePath !== "/") return `/${randomPath + fullNodePath.replace('/?', '?')}`;
+	// The base path is the default: hand back a different realistic endpoint every time, so no
+	// two nodes and no two subscription fetches ever share one blockable pattern.
+	const hex = len => { let s = ''; const pool = '0123456789abcdef'; for (let i = 0; i < len; i++) s += pool[Math.floor(Math.random() * pool.length)]; return s; };
+	const pick = arr => arr[Math.floor(Math.random() * arr.length)];
+	const variant = Math.floor(Math.random() * 4);
+	if (variant === 0) return `/socket.io/?EIO=4&transport=websocket&sid=${hex(16)}`;// the most common legitimate websocket endpoint on the web
+	if (variant === 1) return `/${pick(commonPathWords)}/v${1 + Math.floor(Math.random() * 4)}/${pick(commonPathWords)}?session=${hex(24)}`;
+	if (variant === 2) return `/${pick(commonPathWords)}/${Math.random() < 0.5 ? 'ws' : pick(commonPathWords)}?t=${hex(12)}`;
+	return `/${randomPath}`;
 }
 
 function replaceStarsWithRandom(content) {
@@ -5866,7 +5874,7 @@ async function readConfigJson(env, hostname, userID, UA = "Mozilla/5.0", shouldR
 		skipCertVerify: false,
 		enable0Rtt: false,
 		TLSfragment: null,
-		randomPath: false,
+		randomPath: true,
 		ECH: false,
 		ECHConfig: {
 			DNS: Ali_DoH,

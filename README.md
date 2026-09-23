@@ -41,6 +41,7 @@ That is why a node connects, the client is happy, and nothing ever loads.
 | Egress with `PROXYIP` unset | the colo default plus `publicProxyPool`, shuffled and raced in batches, direct fallback on |
 | Egress with `PROXYIP` set | your whole list deduplicated, shuffled and raced; fallback off, as asked |
 | Subscription output | generated locally for every client type - the public converter APIs are dead, so no external converter is called by default |
+| Node path | a different realistic endpoint per node and per fetch (`/socket.io/?EIO=4...`, `/api/v2/...?session=...`, word paths) instead of a single static `/`, so there is no one pattern to blocklist |
 | Diagnostics | `/admin/pool` probes every egress target and the ECH resolver **from the edge** and returns status plus milliseconds |
 | Admin UI | served by the worker itself (`/login`, `/admin`), nothing fetched from a third-party page |
 | Language | English identifiers, comments, strings and config keys throughout |
