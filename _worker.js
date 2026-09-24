@@ -14,9 +14,9 @@ const publicProxyPool = ['proxyip.cmliussss.net'];
 const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
 ///////////////////////////////////////////////////////Abuse detection signatures///////////////////////////////////////////////
 const signatureDictionary = [
-	(Proxy.name + "IP").toUpperCase(),
-	(String.fromCharCode(67, 109) + URL.name[2] + 'i' + URL.name[0]).toLowerCase(),
-	String(2407 * 300 - 10).split('').reverse().join('')
+	'PROXYIP',
+	'cmliu',
+	'090227'
 ];
 ///////////////////////////////////////////////////////Main entry point///////////////////////////////////////////////
 ///////////////////////////////////////////////////////Built-in admin panel (no external page)///////////////////////////////////////////////
