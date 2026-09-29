@@ -29,8 +29,10 @@ const panelScript = `var FIELDS = [
   ['protocolType', 'Protocol', 'select', 'vless|trojan|ss'],
   ['transportProtocol', 'Transport', 'select', 'ws|grpc|xhttp'],
   ['gRPCmode', 'gRPC mode', 'select', 'gun|multi'],
-  ['ALPN', 'ALPN (blank = default)'],
+  ['ALPN', 'ALPN (blank = http/1.1)'],
   ['Fingerprint', 'uTLS fingerprint'],
+  ['CipherSuites', 'TLS cipherSuites list (cs)'],
+  ['FinalMask', 'Finalmask fragment JSON (fm)'],
   ['skipCertVerify', 'Skip certificate verify', 'bool'],
   ['enable0Rtt', '0-RTT early data', 'bool'],
   ['randomPath', 'Random path', 'bool']
@@ -706,7 +708,7 @@ export default {
 									return `${protocolType}://${btoa(config_JSON.SS.cipherMethod + ':00000000-0000-4000-8000-000000000000')}@${nodeAddress}:${nodePort}?plugin=v2${encodeURIComponent('ray-plugin;mode=websocket;host=example.com;path=' + (config_JSON.randomPath ? randomPath(fullNodePath) : fullNodePath) + (config_JSON.SS.TLS ? ';tls' : '')) + ECHLINKparams + TLSfragmentParams}#${encodeURIComponent(nodeRemark)}`;
 								} else {
 									const transportPathValue = getTransportPathValue(config_JSON, fullNodePath, asPreferredSubGen);
-									return `${protocolType}://00000000-0000-4000-8000-000000000000@${nodeAddress}:${nodePort}?security=tls&type=${transportProtocol + ECHLINKparams}&${domainFieldName}=example.com&fp=${config_JSON.Fingerprint}&${sniParam}&${pathFieldName}=${encodeURIComponent(transportPathValue) + TLSfragmentParams}&encryption=none&alpn=${encodeURIComponent(config_JSON.ALPN)}#${encodeURIComponent(nodeRemark)}`;
+									return `${protocolType}://00000000-0000-4000-8000-000000000000@${nodeAddress}:${nodePort}?security=tls&type=${transportProtocol + ECHLINKparams}&${domainFieldName}=example.com&fp=${config_JSON.Fingerprint}&${sniParam}&${pathFieldName}=${encodeURIComponent(transportPathValue) + TLSfragmentParams}&encryption=none&alpn=${encodeURIComponent(config_JSON.ALPN)}${config_JSON.CipherSuites ? '&cs=' + encodeURIComponent(config_JSON.CipherSuites) : ''}${config_JSON.FinalMask ? '&fm=' + encodeURIComponent(config_JSON.FinalMask) : ''}#${encodeURIComponent(nodeRemark)}`;
 								}
 							}).filter(item => item !== null).join('\n').replace(/__FRONTSNI__/g, frontSNI);
 						} else { // Subscription conversion
@@ -5292,7 +5294,9 @@ function ClashapplySubConfigHotPatch(Clash_rawSubscriptionContent, config_JSON =
 
 async function SingboxapplySubConfigHotPatch(SingBox_rawSubscriptionContent, config_JSON = {}) {
 	const uuid = config_JSON?.UUID || null;
-	const fingerprint = config_JSON?.Fingerprint || "chrome";
+	// "unsafe" is an Xray/PattN value that sing-box cannot parse in tls.fingerprint; fall back to
+	// the stock fingerprint for this output path (sing-box ignores the finalmask recipe anyway).
+	const fingerprint = config_JSON?.Fingerprint === 'unsafe' ? 'chrome' : (config_JSON?.Fingerprint || 'chrome');
 	const ECHenabled = Boolean(config_JSON?.ECH);
 	const ECH_SNI = config_JSON?.ECHConfig?.SNI || "cloudflare-ech.com";
 	const sb_json_text = SingBox_rawSubscriptionContent.replace('1.1.1.1', '8.8.8.8').replace('1.0.0.1', '8.8.4.4');
@@ -5860,13 +5864,17 @@ async function DoHquery(domain, recordType, DoHresolveServer = "https://cloudfla
 
 async function readConfigJson(env, hostname, userID, UA = "Mozilla/5.0", shouldResetConfig = false) {
 	const _p = signatureDictionary[0];
+	// Fragment+fingerprint recipe for the Iran 6-packet upload limit (Sept 2026): every generated
+	// node carries fp=unsafe, alpn=http/1.1, cs=<cipherSuites> and fm=<finalmask> in its link.
+	const recipeCipherSuites = 'TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256:TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384:TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384:TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256:TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256:TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256:TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256:TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA:TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA:TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256:TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256',
+		recipeFinalMask = '{"tcp":[{"type":"fragment","settings":{"packets":"tlshello","lengths":["0","104","1"],"delays":["0"],"maxSplit":"0"}},{"type":"fragment","settings":{"packets":"1-1","lengths":["114","1"],"delays":["1"],"maxSplit":"11"}}]}';
 	const host = hostname, Ali_DoH = "https://dns.alidns.com/dns-query", ECH_SNI = "cloudflare-ech.com", placeholder = '{{IP:PORT}}', configLoadStart = performance.now(), defaultConfigJson = {
 		TIME: new Date().toISOString(),
 		HOST: host,
 		HOSTS: [hostname],
 		UUID: userID,
 		PATH: "/",
-		ALPN: "",
+		ALPN: "http/1.1",
 		protocolType: "v" + "le" + "ss",
 		transportProtocol: "ws",
 		gRPCmode: "gun",
@@ -5888,7 +5896,9 @@ async function readConfigJson(env, hostname, userID, UA = "Mozilla/5.0", shouldR
 		// SNI names something else, so SNI/Host separation does not work on workers.dev. Kept as an
 		// option for a custom domain, where the origin does honour the Host header. Leave empty here.
 		FRONTSNI: "",
-		Fingerprint: "chrome",
+		Fingerprint: "unsafe",
+		CipherSuites: recipeCipherSuites,
+		FinalMask: recipeFinalMask,
 		preferredSubGen: {
 			local: true, // true: use the local preferred addresses  false: the preferred subscription generator
 			localIpPool: {
@@ -5999,7 +6009,7 @@ async function readConfigJson(env, hostname, userID, UA = "Mozilla/5.0", shouldR
 
 	if (env.PATH) config_JSON.PATH = env.PATH.startsWith('/') ? env.PATH : '/' + env.PATH;
 	else if (!config_JSON.PATH) config_JSON.PATH = '/';
-	if (!config_JSON.ALPN) config_JSON.ALPN = "";
+	if (!config_JSON.ALPN) config_JSON.ALPN = "http/1.1";
 
 	if (!config_JSON.gRPCmode) config_JSON.gRPCmode = 'gun';
 	if (!config_JSON.SS) config_JSON.SS = { cipherMethod: "aes-128-gcm", TLS: false };
@@ -6055,7 +6065,11 @@ async function readConfigJson(env, hostname, userID, UA = "Mozilla/5.0", shouldR
 
 	if (!config_JSON.TLSfragment && config_JSON.TLSfragment !== null) config_JSON.TLSfragment = null;
 	const TLSfragmentParams = config_JSON.TLSfragment == 'Shadowrocket' ? `&fragment=${encodeURIComponent('1,40-60,30-50,tlshello')}` : config_JSON.TLSfragment == 'Happ' ? `&fragment=${encodeURIComponent('3,1,tlshello')}` : '';
-	if (!config_JSON.Fingerprint) config_JSON.Fingerprint = "chrome";
+	// Stored configs may still carry the old "chrome" fingerprint; the Sept 2026 bypass requires
+	// "unsafe", so pin fp/alpn/cs/fm here instead of trusting pre-bypass saves.
+	config_JSON.Fingerprint = "unsafe";
+	if (!config_JSON.CipherSuites) config_JSON.CipherSuites = recipeCipherSuites;
+	if (!config_JSON.FinalMask) config_JSON.FinalMask = recipeFinalMask;
 	if (!config_JSON.ECH) config_JSON.ECH = false;
 	if (!config_JSON.ECHConfig) config_JSON.ECHConfig = { DNS: Ali_DoH, SNI: ECH_SNI };
 	const ECHLINKparams = config_JSON.ECH ? `&ech=${encodeURIComponent((config_JSON.ECHConfig.SNI ? config_JSON.ECHConfig.SNI + '+' : '') + config_JSON.ECHConfig.DNS)}` : '';
@@ -6063,7 +6077,7 @@ async function readConfigJson(env, hostname, userID, UA = "Mozilla/5.0", shouldR
 	const transportPathValue = getTransportPathValue(config_JSON, config_JSON.fullNodePath);
 	config_JSON.LINK = config_JSON.protocolType === 'ss'
 		? `${config_JSON.protocolType}://${btoa(config_JSON.SS.cipherMethod + ':' + userID)}@${host}:${config_JSON.SS.TLS ? '443' : '80'}?plugin=v2${encodeURIComponent(`ray-plugin;mode=websocket;host=${host};path=${((config_JSON.fullNodePath.includes('?') ? config_JSON.fullNodePath.replace('?', '?enc=' + config_JSON.SS.cipherMethod + '&') : (config_JSON.fullNodePath + '?enc=' + config_JSON.SS.cipherMethod)) + (config_JSON.SS.TLS ? ';tls' : ''))};mux=0`) + ECHLINKparams}#${encodeURIComponent(config_JSON.preferredSubGen.SUBNAME)}`
-		: `${config_JSON.protocolType}://${userID}@${host}:443?security=tls&type=${transportProtocol + ECHLINKparams}&${domainFieldName}=${host}&fp=${config_JSON.Fingerprint}&sni=${host}&${pathFieldName}=${encodeURIComponent(transportPathValue) + TLSfragmentParams}&encryption=none#${encodeURIComponent(config_JSON.preferredSubGen.SUBNAME)}`;
+		: `${config_JSON.protocolType}://${userID}@${host}:443?security=tls&type=${transportProtocol + ECHLINKparams}&${domainFieldName}=${host}&fp=${config_JSON.Fingerprint}&sni=${host}&${pathFieldName}=${encodeURIComponent(transportPathValue) + TLSfragmentParams}&encryption=none&alpn=${encodeURIComponent(config_JSON.ALPN)}${config_JSON.CipherSuites ? '&cs=' + encodeURIComponent(config_JSON.CipherSuites) : ''}${config_JSON.FinalMask ? '&fm=' + encodeURIComponent(config_JSON.FinalMask) : ''}#${encodeURIComponent(config_JSON.preferredSubGen.SUBNAME)}`;
 	config_JSON.preferredSubGen.TOKEN = await MD5MD5(hostname + userID);
 
 	const tgJsonDefaults = { BotToken: null, ChatID: null };
